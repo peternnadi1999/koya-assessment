@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/* Use these shared tones as bg-brand-600, text-brand-700, border-brand-200, etc. */
+@theme {
+  --color-brand-50: #f3f7f4;
+  --color-brand-100: #e4eee6;
+  --color-brand-200: #c9ddcd;
+  --color-brand-300: #a4c3ab;
+  --color-brand-400: #77a382;
+  --color-brand-500: #548362;
+  --color-brand-600: #3d6c4d;
+  --color-brand-700: #30583e;
+  --color-brand-800: #244630;
+  --color-brand-900: #193724;
+}
+
+:root {
+  --background: #f8faf8;
+  --foreground: #203328;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand-600);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--color-brand-200);
+  color: var(--color-brand-900);
+}
