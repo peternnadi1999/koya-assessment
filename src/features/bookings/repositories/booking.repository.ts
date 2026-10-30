@@ -6,6 +6,7 @@ import type { Cursor, ResetSlot } from "../schemas/booking.schema";
 
 export class SlotTakenError extends Error {}
 export class SlotMissingError extends Error {}
+export class SlotStartedError extends Error {}
 export class IdempotencyKeyTakenError extends Error {}
 
 const isCode = (err: unknown, code: string) =>
@@ -111,6 +112,34 @@ export async function cancelConfirmedBooking(id: string): Promise<CancelOutcome>
   const booking = await prisma.booking.findUnique({ where: { id } });
   if (!booking) return { kind: "missing" };
   return count === 1 ? { kind: "cancelled", booking } : { kind: "already_cancelled" };
+}
+
+export async function rescheduleConfirmedBooking(
+  id: string,
+  slotId: string,
+): Promise<Booking | null> {
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.booking.findUnique({ where: { id } });
+    if (!current || current.status !== "confirmed") return null;
+
+    const slot = await tx.slot.findUnique({ where: { id: slotId } });
+    if (!slot) throw new SlotMissingError();
+    if (slot.start.getTime() <= Date.now()) throw new SlotStartedError();
+
+    try {
+      const { count } = await tx.booking.updateMany({
+        where: { id, status: "confirmed", slotId: current.slotId },
+        data: { slotId },
+      });
+      if (count !== 1) return null;
+    } catch (err) {
+      if (isCode(err, "P2002")) throw new SlotTakenError();
+      if (isCode(err, "P2003")) throw new SlotMissingError();
+      throw err;
+    }
+
+    return tx.booking.findUnique({ where: { id } });
+  });
 }
 
 /** Oldest first, keyset-paginated by (createdAt, id). Fetches one extra row to detect a next page. */

@@ -40,14 +40,18 @@ Every request needs `X-API-Key` (401 otherwise). Errors are always `{"error": "<
 `/` lists open slots, the form books one, `/confirmation/:id` shows the result. The page books through a
 server action that calls the same service as the API, so the API key never reaches the browser. (The
 confirmation page is `/confirmation/:id`, not `/bookings/:id`, because that path is the JSON API.)
+The confirmation page provides a private `/manage/:id?token=…` link for cancelling or rescheduling
+upcoming appointments. The token is an HMAC signed with `API_KEY`, checked on every server action,
+and does not rely on an email-only lookup. Keep `API_KEY` secret and use a strong random value; rotating
+it invalidates existing management links. Management pages are excluded from search indexing.
 
 ## Structure
 
 ```
 src/app/{reset,slots,bookings,bookings/[id]}/route.ts   API route handlers (auth → call service)
-src/app/{page.tsx,confirmation/[id]}                    web pages
+src/app/{page.tsx,confirmation/[id],manage/[id]}        web pages
 src/features/bookings   components, schemas (parsing/validation), services (rules), repositories (Prisma only), actions
-src/server              db client, API-key check, rate limiter
+src/server              db client, API-key check, rate limiter, management-link signing
 src/lib                 env validation, errors, helpers
 prisma/                 schema, hand-written migration, seed
 tests/                  unit (Vitest) and e2e (runs against a live URL)
@@ -62,4 +66,3 @@ tests/                  unit (Vitest) and e2e (runs against a live URL)
 | `npm test` | Unit tests |
 | `E2E_BASE_URL=… E2E_API_KEY=… npm test -- e2e` | Spec checks against a running server (**it calls `/reset`**) |
 | `npm run db:migrate` / `db:deploy` / `db:seed` / `db:studio` | Prisma helpers |
-

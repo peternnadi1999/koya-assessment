@@ -3,6 +3,10 @@ import type { Booking, Slot } from "@prisma/client";
 import { Errors } from "@/lib/errors";
 import { toIso } from "@/lib/utils";
 import { enforceBookingRateLimit } from "@/server/security/rate-limit";
+import {
+  createBookingManagementToken,
+  verifyBookingManagementToken,
+} from "@/server/auth/booking-management";
 import * as repo from "../repositories/booking.repository";
 import {
   asObject,
@@ -70,12 +74,17 @@ export async function getBooking(id: string): Promise<BookingDTO> {
 /** For the confirmation page: the booking plus the slot it is for. */
 export async function getConfirmation(
   id: string,
-): Promise<{ booking: BookingDTO; slot: Pick<Slot, "provider"> & { start: string; end: string } }> {
+): Promise<{
+  booking: BookingDTO;
+  slot: Pick<Slot, "provider"> & { start: string; end: string };
+  managementToken: string;
+}> {
   const found = await repo.findBookingById(id);
   if (!found) throw Errors.notFound("booking not found");
   return {
     booking: toBookingDTO(found),
     slot: { provider: found.slot.provider, start: toIso(found.slot.start), end: toIso(found.slot.end) },
+    managementToken: createBookingManagementToken(found.id, found.email),
   };
 }
 
@@ -159,6 +168,67 @@ export async function cancelBooking(id: string): Promise<BookingDTO> {
   if (outcome.kind === "missing") throw Errors.notFound("booking not found");
   if (outcome.kind === "already_cancelled") throw Errors.conflict("booking is already cancelled");
   return toBookingDTO(outcome.booking);
+}
+
+export async function getManageableBooking(
+  id: string,
+  token: string,
+): Promise<{
+  booking: BookingDTO;
+  slot: Pick<Slot, "provider"> & { start: string; end: string };
+  canManage: boolean;
+}> {
+  const found = await repo.findBookingById(id);
+  if (!found || !verifyBookingManagementToken(found.id, found.email, token)) {
+    throw Errors.notFound("appointment not found");
+  }
+  return {
+    booking: toBookingDTO(found),
+    slot: { provider: found.slot.provider, start: toIso(found.slot.start), end: toIso(found.slot.end) },
+    canManage: found.status === "confirmed" && found.slot.start.getTime() > Date.now(),
+  };
+}
+
+export async function cancelManagedBooking(id: string, token: string): Promise<BookingDTO> {
+  const found = await getManageableBooking(id, token);
+  if (found.booking.status !== "confirmed") {
+    throw Errors.conflict("booking is already cancelled");
+  }
+  if (new Date(found.slot.start).getTime() <= Date.now()) {
+    throw Errors.conflict("appointments that have started cannot be cancelled online");
+  }
+  return cancelBooking(id);
+}
+
+export async function rescheduleManagedBooking(
+  id: string,
+  token: string,
+  slotId: string,
+): Promise<BookingDTO> {
+  const found = await getManageableBooking(id, token);
+  if (found.booking.status !== "confirmed") {
+    throw Errors.conflict("cancelled appointments cannot be rescheduled");
+  }
+  if (new Date(found.slot.start).getTime() <= Date.now()) {
+    throw Errors.conflict("appointments that have started cannot be rescheduled");
+  }
+  if (!slotId.trim() || slotId.length > 200) {
+    throw Errors.badRequest("slot_id is required");
+  }
+  if (slotId === found.booking.slot_id) {
+    throw Errors.badRequest("choose a different appointment time");
+  }
+
+  try {
+    const booking = await repo.rescheduleConfirmedBooking(id, slotId);
+    if (!booking) throw Errors.conflict("booking is no longer confirmed");
+    return toBookingDTO(booking);
+  } catch (err) {
+    if (err instanceof repo.SlotTakenError) throw Errors.conflict("slot is already booked");
+    if (err instanceof repo.SlotMissingError) throw Errors.notFound("slot not found");
+    if (err instanceof repo.SlotStartedError) throw Errors.badRequest("slot has already started");
+    throw err;
+  }
 }
 
 // ---- Level 4 -------------------------------------------------------------------
